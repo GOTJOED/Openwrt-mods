@@ -30,11 +30,12 @@ A real-time firewall intelligence dashboard for OpenWrt LuCI. Visualize dropped 
 * SSH access to your router
 
 #### 1. Create Directory Structure
+This Creates an isolated, dedicated folder for your custom dashboard frontend code. This keeps it separate from other LuCI apps so nothing conflicts.
 ```bash
 mkdir -p /www/luci-static/resources/view/dashboard
 ```
 
-#### 2. Register LuCi Menu
+#### 2. Register "Dashboard" LuCi Menu
 ```bash
 vi /usr/share/luci/menu.d/luci-app-mod-dashboard.json
 ```
@@ -52,6 +53,7 @@ Paste the following:
 }
 ```
 #### 3. Setup ACL Permissions
+This Acts as the security gatekeeper for OpenWrt's rpcd daemon. Without this, LuCI hides the tab and blocks access even for the root user.
 ```bash
 vi /usr/share/rpcd/acl.d/luci-app-mod-dashboard.json
 ```
@@ -75,6 +77,7 @@ Paste the following:
 }
 ```
 #### 4. Add the Frontend Code
+The client-side JavaScript that renders in your browser.
 ```bash
 vi /www/luci-static/resources/view/dashboard/index.js
 ```
@@ -299,7 +302,8 @@ rm -rf /tmp/luci-indexcache /tmp/luci-modulecache/
 /etc/init.d/rpcd restart
 /etc/init.d/uhttpd restart
 ```
-Then refresh your OpenWrt.
+Then refresh your OpenWrt. 
+The Dashboard should now apear at your mother Tabs.
 
 
 
