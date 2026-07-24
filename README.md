@@ -28,3 +28,7 @@ A real-time firewall intelligence dashboard for OpenWrt LuCI. Visualize dropped 
 * OpenWrt 25.x or later
 * LuCI web interface installed
 * SSH access to your router
+
+#### 1. Create Directory Structure
+```bash
+mkdir -p /www/luci-static/resources/view/dashboard
