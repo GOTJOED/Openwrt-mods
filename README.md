@@ -36,7 +36,7 @@ mkdir -p /www/luci-static/resources/view/dashboard
 
 #### 2. Register LuCi Menu
 ```bash
-vi /usr/share/luci/menu.d/luci-app-dashboard.json
+vi /usr/share/luci/menu.d/luci-app-mod-dashboard.json
 ```
 Paste the following:
 ```bash
@@ -53,7 +53,7 @@ Paste the following:
 ```
 #### 3. Setup ACL Permissions
 ```bash
-vi /usr/share/rpcd/acl.d/luci-app-dashboard.json
+vi /usr/share/rpcd/acl.d/luci-app-mod-dashboard.json
 ```
 Paste the following:
 ```bash
