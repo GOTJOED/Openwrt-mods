@@ -2,7 +2,7 @@
 
 ![Version](https://img.shields.io/badge/version-1.0.0-purple.svg) ![License](https://img.shields.io/badge/license-MIT-green.svg) ![OpenWrt](https://img.shields.io/badge/OpenWrt-21.02+-orange.svg)
 
-A real-time firewall intelligence dashboard for OpenWrt LuCI. Visualize dropped and allowed packets, identify top offending IPs, and monitor triggered firewall rules directly from your router.
+A fresh installation of OpenWrt 25.x does not come with a built-in visual firewall intelligence dashboard out of the box. This lightweight package bridges that gap by adding a real-time tracking interface directly into your LuCI web UI—letting you visualize dropped and allowed packets, identify top offending IPs, and monitor triggered firewall rules straight from your router without heavy backend databases.
 
 ## Features
 
