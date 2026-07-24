@@ -305,6 +305,8 @@ rm -rf /tmp/luci-indexcache /tmp/luci-modulecache/
 Then refresh your OpenWrt. 
 The Dashboard should now apear at your mother Tabs.
 
+## Screenshots
+<img width="1342" height="913" alt="dashboard" src="https://github.com/user-attachments/assets/48224aff-21bc-4e57-af0a-4fe1b1bad7b4" />
 
 
 
