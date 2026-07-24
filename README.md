@@ -32,3 +32,9 @@ A real-time firewall intelligence dashboard for OpenWrt LuCI. Visualize dropped 
 #### 1. Create Directory Structure
 ```bash
 mkdir -p /www/luci-static/resources/view/dashboard
+
+#### 2. Register LuCi Menu
+```bash
+vi /usr/share/luci/menu.d/luci-app-dashboard.json
+
+Paste the following:
