@@ -1,4 +1,4 @@
-# luci-app-mod-dashboard
+# luci-app-joeddashboard
 
 ![Version](https://img.shields.io/badge/version-1.0.0-purple.svg) ![License](https://img.shields.io/badge/license-MIT-green.svg) ![OpenWrt](https://img.shields.io/badge/OpenWrt-21.02+-orange.svg)
 
