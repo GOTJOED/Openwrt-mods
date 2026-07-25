@@ -6,19 +6,23 @@ A fresh installation of OpenWrt 25.x does not come with a built-in visual firewa
 
 ## Features
 
-🛡️ **Live Packet Tracking**
-* Real-time monitoring of OpenWrt `dmesg` logs
-* Visual badges for firewall actions (ALLOW, DROP, REJECT)
-* Protocol identification (TCP, UDP, ICMP, Custom Protocol)
+🔍 **Search & Forensics**
+* Smart Multi-Term Search: You can type multiple words (like DROP 192.168.1.31 UDP) and it filters down to rows matching all those terms.
+* Time Range Filtering: Type 10:20:00 - 10:30:00 in the search bar to isolate traffic from a specific window.
+* Stackable Click-to-Search: Clicking on any row data (IPs, Actions, Rules) or Leaderboard items instantly adds that word to your search bar, stacking them together for rapid forensic narrowing.
 
-📊 **Smart Analytics**
-* Top Source IPs leaderboard
-* Top Target IPs leaderboard
-* Top Triggered Firewall Rules tracking
+📊 **Real-Time Analytics**
+* Live Leaderboards: Four dynamic lists automatically track and rank the Top Rules Hit, Top Source IPs, Top Target IPs, and Top Ports.
+* Live Polling: The system silently reads dmesg every couple of seconds and injects new logs into your dashboard instantly.
+* External IP Lookups: Clicking any public IP address opens a new tab to ipinfo.io so you can instantly see who owns that IP and where it is located.
 
-⚡ **Interactive Interface**
-* Clickable IP addresses for instant search filtering
-* Global search bar
+💻 **Data Handling & UI**
+* Pagination: Prevents browser lag by organizing massive log dumps into fast-loading pages of 100 items each, complete with ◀ and ▶ controls.
+* Full MAC Address Display: Shows the complete, uncut MAC address underneath the source IP.
+* Pause/Resume Feed: A toggle button to freeze incoming logs so you can read fast-moving data without it jumping around.
+* Export to CSV: One-click download of whatever is currently on your screen (respecting your search filters) into a spreadsheet file for offline auditing.
+* Clear Logs (Soft Clear): A panic button that hides all previous logs from your screen instantly, letting you start with a clean slate from that exact second onward.
+* Action Badging: Color-coded tags for Actions (Green for ALLOW, Red for DROP, Orange for REJECT) for quick visual scanning.
 
 ⚠️ **IMPORTANT NOTE: Log Buffer & History**
 * Limited Historical Scope: While this dashboard provides a searchable history, it is not a long-term forensic log solution. It parses and displays only the most recent 10,000 lines of the system dmesg buffer.
@@ -100,18 +104,14 @@ Paste the following:
 'require poll';
 
 return view.extend({
-    // Store live counters and history for the leaderboards
-    last_ts: 0,
     isPaused: false,
-    stats: {
-        src: {},
-        dst: {},
-        rule: {}
-    },
-    
+    clear_ts: 0,
+    currentFilteredItems: [],
+    currentPage: 0,
+    pageSize: 100,
+
     // Generalized parser to extract all key details from dmesg
     parseLogLine: function(line) {
-        // Extracts: [ 8433.701] Rule-Name: Payload...
         var match = line.match(/^\[\s*([\d\.]+)\]\s+(.*?):\s+(.*)$/);
         if (!match) return null;
 
@@ -119,19 +119,16 @@ return view.extend({
         var rule = match[2].trim();
         var payload = match[3];
 
-        // Dynamically extract SRC=, DST=, IN=, etc.
         var kv = {};
         payload.replace(/([A-Z]+)=([^\s]+)/g, function(m, key, val) {
             kv[key] = val;
         });
 
-        // Deduce Action based on rule name keywords
         var action = 'DROP';
         var rLower = rule.toLowerCase();
         if (rLower.indexOf('allow') > -1 || rLower.indexOf('accept') > -1 || rLower.indexOf('pass') > -1) action = 'ALLOW';
         else if (rLower.indexOf('reject') > -1) action = 'REJECT';
 
-        // Dynamic Protocol Mapping & Port Identification
         var proto = kv.PROTO || '-';
         var protoMap = { 
             '1': 'ICMP', '2': 'IGMP', '6': 'TCP', '17': 'UDP', 
@@ -147,7 +144,7 @@ return view.extend({
         if (protoMap[proto]) {
             proto = protoMap[proto];
         } else if (/^\d+$/.test(proto)) {
-            proto = 'PROTO-' + proto; // Custom/unknown numeric protocols dynamically handled
+            proto = 'PROTO-' + proto; 
         }
 
         var fmtPort = function(p) {
@@ -164,15 +161,16 @@ return view.extend({
             dst: kv.DST || '-',
             proto: proto,
             spt: fmtPort(kv.SPT),
-            dpt: fmtPort(kv.DPT)
+            dpt: fmtPort(kv.DPT),
+            macOrig: kv.MAC || ''
         };
     },
 
-    // Helper to generate a sorted leaderboard card
+    // Helper to generate a scrollable, dynamic leaderboard card
     generateTopList: function(statObj, title, searchInput) {
         var sorted = Object.keys(statObj).sort(function(a, b) {
             return statObj[b] - statObj[a];
-        }).slice(0, 5); // Get top 5
+        }); 
 
         var listItems = sorted.map(function(key) {
             var row = E('div', { 'style': 'display: flex; justify-content: space-between; margin-bottom: 8px; border-bottom: 1px solid #333; padding-bottom: 5px; cursor: pointer; transition: background 0.2s;' }, [
@@ -180,14 +178,21 @@ return view.extend({
                 E('strong', { 'style': 'color: #38bdf8; background: #0f172a; padding: 2px 8px; border-radius: 12px; font-size: 12px;' }, statObj[key])
             ]);
 
-            // Clickable Leaderboard Items to Filter Logs
             row.addEventListener('mouseenter', function() { this.style.background = '#27272a'; });
             row.addEventListener('mouseleave', function() { this.style.background = 'transparent'; });
             
             row.addEventListener('click', function() {
                 if (searchInput) {
-                    searchInput.value = key;
-                    // Trigger an input event so the UI updates and the next poll cycle filters the history
+                    var termToAdd = key.replace(/\s*\(.*\)$/, ''); // Strip port names like (DNS)
+                    var currentTokens = searchInput.value.trim().toLowerCase().split(/\s+/);
+                    var newTokens = termToAdd.toLowerCase().split(/\s+/);
+                    
+                    // Only append if the term isn't already part of the current search
+                    var alreadyHasTerm = newTokens.every(function(t) { return currentTokens.indexOf(t) !== -1; });
+                    
+                    if (!alreadyHasTerm || searchInput.value.trim() === '') {
+                        searchInput.value = (searchInput.value.trim() + ' ' + termToAdd).trim();
+                    }
                     searchInput.dispatchEvent(new Event('input')); 
                 }
             });
@@ -199,38 +204,102 @@ return view.extend({
             listItems = [ E('div', { 'style': 'color: #666; font-style: italic; font-size: 13px; text-align: center; padding: 10px 0;' }, 'Awaiting traffic data...') ];
         }
 
-        return E('div', { 'style': 'flex: 1; min-width: 250px; background: #1e1e1e; border: 1px solid #333; border-radius: 8px; padding: 15px; margin: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.3);' }, [
+        return E('div', { 'style': 'flex: 1; min-width: 220px; background: #1e1e1e; border: 1px solid #333; border-radius: 8px; padding: 15px; margin: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.3);' }, [
             E('h4', { 'style': 'margin-top: 0; color: #f8fafc; border-bottom: 2px solid #38bdf8; padding-bottom: 8px; font-weight: 600; text-transform: uppercase; font-size: 12px; letter-spacing: 1px;' }, title),
-            E('div', { 'style': 'margin-top: 15px;' }, listItems)
+            E('div', { 'style': 'margin-top: 10px; max-height: 150px; overflow-y: auto; padding-right: 5px;' }, listItems)
         ]);
     },
 
     render: function() {
         var self = this;
         
-        // Search Bar Element
         var searchInput = E('input', {
             'type': 'text',
             'id': 'firewall-search-input',
             'placeholder': 'Search Time, Action, Rule, IP, Proto...',
             'class': 'cbi-input-text',
-            'style': 'flex: 1; padding: 10px 15px; background: #1e1e1e; color: #fff; border: 1px solid #333; border-radius: 6px; box-shadow: inset 0 2px 4px rgba(0,0,0,0.2); outline: none;'
+            'style': 'flex: 1; padding: 10px 15px; background: #1e1e1e; color: #fff; border: 1px solid #333; border-radius: 6px; box-shadow: inset 0 2px 4px rgba(0,0,0,0.2); outline: none; min-width: 200px;'
         });
 
-        // Pause/Resume Button
+        // Reset page back to 0 whenever user searches
+        searchInput.addEventListener('input', function() {
+            self.currentPage = 0;
+        });
+
+        // Top Left Pagination Controls
+        var prevPageBtn = E('button', {
+            'class': 'cbi-button',
+            'style': 'background: #334155; color: #fff; border: 1px solid #475569; padding: 6px 12px; border-radius: 6px; cursor: pointer; font-weight: bold; transition: background 0.2s;'
+        }, '◀');
+
+        var nextPageBtn = E('button', {
+            'class': 'cbi-button',
+            'style': 'background: #334155; color: #fff; border: 1px solid #475569; padding: 6px 12px; border-radius: 6px; cursor: pointer; font-weight: bold; transition: background 0.2s;'
+        }, '▶');
+
+        var pageIndicator = E('span', {
+            'style': 'color: #38bdf8; font-weight: 600; font-size: 13px; font-family: monospace; white-space: nowrap;'
+        }, '1 - 100');
+
+        var paginationWrapper = E('div', {
+            'style': 'display: flex; align-items: center; gap: 8px; background: #18181b; padding: 4px 10px; border-radius: 6px; border: 1px solid #27272a;'
+        }, [ prevPageBtn, pageIndicator, nextPageBtn ]);
+
+        prevPageBtn.addEventListener('click', function() {
+            if (self.currentPage > 0) {
+                self.currentPage--;
+            }
+        });
+
+        nextPageBtn.addEventListener('click', function() {
+            var maxPage = Math.floor((self.currentFilteredItems.length - 1) / self.pageSize);
+            if (self.currentPage < maxPage) {
+                self.currentPage++;
+            }
+        });
+
         var pauseBtn = E('button', {
             'class': 'cbi-button',
-            'style': 'margin-left: 15px; background: #0ea5e9; color: #fff; border: none; padding: 10px 15px; border-radius: 6px; cursor: pointer; font-weight: 600; min-width: 130px; transition: background 0.3s;'
+            'style': 'background: #0ea5e9; color: #fff; border: none; padding: 10px 15px; border-radius: 6px; cursor: pointer; font-weight: 600; min-width: 130px; transition: background 0.3s;'
         }, '⏸ Pause Logs');
+
+        var exportBtn = E('button', {
+            'class': 'cbi-button',
+            'style': 'background: #8b5cf6; color: #fff; border: none; padding: 10px 15px; border-radius: 6px; cursor: pointer; font-weight: 600; transition: background 0.3s;'
+        }, '💾 Export CSV');
+
+        var clearBtn = E('button', {
+            'class': 'cbi-button',
+            'style': 'background: #ef4444; color: #fff; border: none; padding: 10px 15px; border-radius: 6px; cursor: pointer; font-weight: 600; transition: background 0.3s;'
+        }, '🗑 Clear Logs');
 
         pauseBtn.addEventListener('click', function() {
             self.isPaused = !self.isPaused;
             this.textContent = self.isPaused ? '▶ Resume Logs' : '⏸ Pause Logs';
-            this.style.background = self.isPaused ? '#10b981' : '#0ea5e9'; // Switches to green when paused
+            this.style.background = self.isPaused ? '#10b981' : '#0ea5e9'; 
         });
 
-        // Container for search + dynamic hint text below it
-        var searchWrapper = E('div', { 'style': 'display: flex; width: 100%; margin-bottom: 5px;' }, [ searchInput, pauseBtn ]);
+        exportBtn.addEventListener('click', function() {
+            var csv = 'Time,Action,Rule,Interface,MAC,Source,Destination,Protocol\n';
+            self.currentFilteredItems.forEach(function(i) {
+                csv += [i.timeString, i.action, i.rule, i.inFace, i.macStr, (i.src+i.spt), (i.dst+i.dpt), i.proto].join(',') + '\n';
+            });
+            var blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+            var url = URL.createObjectURL(blob);
+            var a = document.createElement('a');
+            a.href = url;
+            a.download = 'firewall_logs.csv';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+        });
+
+        clearBtn.addEventListener('click', function() {
+            self.clear_ts = Date.now(); 
+            self.currentPage = 0;
+        });
+
+        var searchWrapper = E('div', { 'style': 'display: flex; width: 100%; margin-bottom: 5px; gap: 10px; flex-wrap: wrap; align-items: center;' }, [ paginationWrapper, searchInput, pauseBtn, exportBtn, clearBtn ]);
         var searchHint = E('div', { 'style': 'font-size: 11px; color: #a1a1aa; margin-bottom: 15px; margin-left: 5px; font-style: italic;' }, 
             '💡 Guide: Search by IP (192.168.1.1), Action (DROP), or a Time Range (e.g., 20:00:00 - 21:00:00)'
         );
@@ -238,7 +307,6 @@ return view.extend({
         var statContainer = E('div', { 'style': 'display: flex; flex-wrap: wrap; margin-bottom: 20px; margin-left: -10px; margin-right: -10px;' }, []);
         var tableBody = E('tbody', { 'id': 'firewall-log-rows' });
 
-        // Upgraded Ultra-Modern GOT JOED Banner
         var headerBanner = E('div', { 
             'style': 'margin-bottom: 25px; padding: 20px 25px; background: linear-gradient(145deg, #18181b 0%, #09090b 100%); border-left: 6px solid #0ea5e9; border-radius: 10px; box-shadow: 0 10px 25px rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: space-between;' 
         }, [
@@ -254,11 +322,11 @@ return view.extend({
 
         var container = E('div', { 'class': 'cbi-map', 'style': 'padding: 10px;' }, [
             headerBanner,
-            searchWrapper, // Added flex container
-            searchHint,    // Added recommendation text
+            searchWrapper, 
+            searchHint,    
             statContainer,
-            E('div', { 'style': 'background: #1e1e1e; border: 1px solid #333; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.3);' }, [
-                E('table', { 'class': 'table', 'style': 'width: 100%; font-size: 13px; margin: 0; border: none;' }, [
+            E('div', { 'style': 'background: #1e1e1e; border: 1px solid #333; border-radius: 8px; overflow-x: auto; box-shadow: 0 4px 6px rgba(0,0,0,0.3);' }, [
+                E('table', { 'class': 'table', 'style': 'width: 100%; min-width: 850px; font-size: 13px; margin: 0; border: none; white-space: nowrap;' }, [
                     E('thead', { 'style': 'background: #27272a;' }, [
                         E('tr', { 'class': 'tr table-titles', 'style': 'color: #a1a1aa; text-align: left;' }, [
                             E('th', { 'class': 'th', 'style': 'padding: 12px;' }, 'Time'),
@@ -276,62 +344,55 @@ return view.extend({
         ]);
 
         poll.add(function() {
-            // Abort polling check if logs are paused
             if (self.isPaused) return Promise.resolve();
 
-            // Fetch Uptime alongside dmesg (Massive buffer of 10000 lines for deep history searches)
             return fs.exec('sh', ['-c', 'cat /proc/uptime | cut -d" " -f1 && dmesg | tail -n 10000']).then(function(res) {
                 if (!res || !res.stdout) return;
                 
                 var lines = res.stdout.trim().split('\n');
+                var uptimeSeconds = parseFloat(lines.shift()); 
+                var bootTimeMs = Date.now() - (uptimeSeconds * 1000); 
 
-                // Time Calculation Math
-                var uptimeSeconds = parseFloat(lines.shift()); // Extract Uptime from line 1
-                var bootTimeMs = Date.now() - (uptimeSeconds * 1000); // Browser time minus uptime
+                var allItems = []; 
+                var dynStats = { src: {}, dst: {}, rule: {}, port: {} };
 
-                var currentBatchTs = 0;
-                var allItems = []; // Hold ALL matching logs internally for searching
-
-                // Parse from bottom (newest) to top
                 for (var i = lines.length - 1; i >= 0; i--) {
                     if (!lines[i]) continue;
                     var parsed = self.parseLogLine(lines[i]);
                     if (!parsed) continue;
 
-                    // Filter out IPv6 Logs
                     if (parsed.src.indexOf(':') !== -1 || parsed.dst.indexOf(':') !== -1) continue;
-
-                    // Stats only count NEW events based on timestamp
-                    if (parsed.ts > self.last_ts) {
-                        if (parsed.src !== '-') self.stats.src[parsed.src] = (self.stats.src[parsed.src] || 0) + 1;
-                        if (parsed.dst !== '-') self.stats.dst[parsed.dst] = (self.stats.dst[parsed.dst] || 0) + 1;
-                        self.stats.rule[parsed.rule] = (self.stats.rule[parsed.rule] || 0) + 1;
-                        
-                        if (parsed.ts > currentBatchTs) currentBatchTs = parsed.ts;
-                    }
                     
-                    // Convert to 24H Real-Time
                     var logTimeMs = bootTimeMs + (parsed.ts * 1000);
-                    parsed.timeString = new Date(logTimeMs).toLocaleTimeString('en-GB'); // en-GB forces 24H format natively
+                    if (logTimeMs < self.clear_ts) break; 
+                    
+                    parsed.timeString = new Date(logTimeMs).toLocaleTimeString('en-GB'); 
 
-                    // Push EVERYTHING to allItems so we can search the whole 10,000 history
+                    // Extract complete MAC address from packet string
+                    var macStr = '';
+                    if (parsed.macOrig) {
+                        var srcPart = parsed.macOrig.substring(18, 35);
+                        if (srcPart.match(/^([0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}$/)) {
+                            macStr = srcPart;
+                        } else {
+                            macStr = parsed.macOrig;
+                        }
+                    }
+                    parsed.macStr = macStr;
+
                     allItems.push(parsed);
                 }
-
-                if (currentBatchTs > self.last_ts) self.last_ts = currentBatchTs;
 
                 var searchQuery = searchInput.value.toLowerCase().trim();
                 var filteredItems = allItems;
 
                 if (searchQuery) {
-                    // DYNAMIC TIME RANGE: Detect if search is a time range like "20:00:00 - 21:00:00"
                     var timeRangeMatch = searchQuery.match(/(\d{1,2}:\d{2}(?::\d{2})?)\s*-\s*(\d{1,2}:\d{2}(?::\d{2})?)/);
                     
                     if (timeRangeMatch) {
                         var startT = timeRangeMatch[1];
                         var endT = timeRangeMatch[2];
                         
-                        // Normalize formats (pad seconds and leading zeros for safe string comparison)
                         if (startT.length <= 5) startT += ':00';
                         if (endT.length <= 5) endT += ':59';
                         if (startT.length === 7) startT = '0' + startT;
@@ -339,37 +400,83 @@ return view.extend({
 
                         filteredItems = allItems.filter(function(item) {
                             var itemT = item.timeString;
-                            if (itemT.length === 7) itemT = '0' + itemT; // Pad log time if needed
+                            if (itemT.length === 7) itemT = '0' + itemT; 
                             return itemT >= startT && itemT <= endT;
                         });
+                        
+                        // Apply additional term filters if the user combined a time range with text
+                        var remainingQuery = searchQuery.replace(timeRangeMatch[0], '').trim();
+                        if (remainingQuery) {
+                            var tokens = remainingQuery.split(/\s+/);
+                            filteredItems = filteredItems.filter(function(item) {
+                                var searchStr = [
+                                    item.timeString, item.action, item.rule, item.inFace, 
+                                    item.src + item.spt, item.dst + item.dpt, item.proto, item.macStr
+                                ].join(' ').toLowerCase();
+                                return tokens.every(function(token) {
+                                    return searchStr.indexOf(token) !== -1;
+                                });
+                            });
+                        }
                     } else {
-                        // STANDARD TEXT SEARCH across all fields
+                        var tokens = searchQuery.split(/\s+/);
                         filteredItems = allItems.filter(function(item) {
                             var searchStr = [
-                                item.timeString,
-                                item.action,
-                                item.rule,
-                                item.inFace,
-                                item.src + item.spt,
-                                item.dst + item.dpt,
-                                item.proto
+                                item.timeString, item.action, item.rule, item.inFace, 
+                                item.src + item.spt, item.dst + item.dpt, item.proto, item.macStr
                             ].join(' ').toLowerCase();
                             
-                            return searchStr.indexOf(searchQuery) !== -1;
+                            // Check that EVERY search token exists in the row string (Narrowing Down)
+                            return tokens.every(function(token) {
+                                return searchStr.indexOf(token) !== -1;
+                            });
                         });
                     }
                 }
 
-                // Slice the huge filtered list down to 80 rows for safe display rendering
-                var displayItems = filteredItems.slice(0, 80);
+                self.currentFilteredItems = filteredItems;
 
-                // 1. Rebuild Stat Cards
+                filteredItems.forEach(function(item) {
+                    if (item.src !== '-') dynStats.src[item.src] = (dynStats.src[item.src] || 0) + 1;
+                    if (item.dst !== '-') dynStats.dst[item.dst] = (dynStats.dst[item.dst] || 0) + 1;
+                    dynStats.rule[item.rule] = (dynStats.rule[item.rule] || 0) + 1;
+                    
+                    var pt = item.dpt || item.spt || '-';
+                    if (pt !== '-') dynStats.port[pt] = (dynStats.port[pt] || 0) + 1;
+                });
+
+                var total = filteredItems.length;
+                var startIdx = self.currentPage * self.pageSize;
+                
+                // Keep page index within valid range
+                if (startIdx >= total && total > 0) {
+                    self.currentPage = Math.floor((total - 1) / self.pageSize);
+                    startIdx = self.currentPage * self.pageSize;
+                }
+
+                var endIdx = Math.min(startIdx + self.pageSize, total);
+                var displayItems = filteredItems.slice(startIdx, endIdx);
+
+                // Update Pagination Controls UI
+                if (total === 0) {
+                    pageIndicator.textContent = '0 - 0';
+                    prevPageBtn.disabled = true;
+                    nextPageBtn.disabled = true;
+                } else {
+                    pageIndicator.textContent = (startIdx + 1) + ' - ' + endIdx + ' of ' + total;
+                    prevPageBtn.disabled = (self.currentPage === 0);
+                    nextPageBtn.disabled = (endIdx >= total);
+                }
+
+                prevPageBtn.style.opacity = prevPageBtn.disabled ? '0.4' : '1';
+                nextPageBtn.style.opacity = nextPageBtn.disabled ? '0.4' : '1';
+
                 while (statContainer.firstChild) statContainer.removeChild(statContainer.firstChild);
-                statContainer.appendChild(self.generateTopList(self.stats.rule, 'Top Rules Hit', searchInput));
-                statContainer.appendChild(self.generateTopList(self.stats.src, 'Top Source IPs', searchInput));
-                statContainer.appendChild(self.generateTopList(self.stats.dst, 'Top Target IPs', searchInput));
+                statContainer.appendChild(self.generateTopList(dynStats.rule, 'Top Rules Hit', searchInput));
+                statContainer.appendChild(self.generateTopList(dynStats.src, 'Top Source IPs', searchInput));
+                statContainer.appendChild(self.generateTopList(dynStats.dst, 'Top Target IPs', searchInput));
+                statContainer.appendChild(self.generateTopList(dynStats.port, 'Top Ports Hit', searchInput));
 
-                // 2. Rebuild Table Rows
                 while (tableBody.firstChild) tableBody.removeChild(tableBody.firstChild);
                 
                 if (displayItems.length === 0) {
@@ -378,34 +485,62 @@ return view.extend({
                      ]));
                 }
                 
-                displayItems.forEach(function(item) {
+                var formatIPHook = function(ipStr) {
+                    if (ipStr === '-' || ipStr.indexOf(':') > -1 && ipStr.split(':').length > 2) return ipStr;
+                    return E('a', { 
+                        'href': 'https://ipinfo.io/' + ipStr, 
+                        'target': '_blank', 
+                        'style': 'color: inherit; text-decoration: none; border-bottom: 1px dashed currentcolor;',
+                        'onclick': 'event.stopPropagation()' 
+                    }, ipStr);
+                };
 
-                    var badgeColor = '#52525b'; // default gray
-                    if (item.action === 'ALLOW') badgeColor = '#059669'; // emerald
-                    if (item.action === 'DROP') badgeColor = '#dc2626'; // red
-                    if (item.action === 'REJECT') badgeColor = '#d97706'; // amber
+                displayItems.forEach(function(item) {
+                    var badgeColor = '#52525b'; 
+                    if (item.action === 'ALLOW') badgeColor = '#059669'; 
+                    if (item.action === 'DROP') badgeColor = '#dc2626'; 
+                    if (item.action === 'REJECT') badgeColor = '#d97706'; 
 
                     var actionBadge = E('span', { 'style': 'background:' + badgeColor + '; color:#fff; padding: 3px 8px; border-radius: 4px; font-weight: 700; font-size: 10px; letter-spacing: 0.5px;' }, item.action);
+
+                    var srcCell = E('div', {}, [
+                        formatIPHook(item.src),
+                        E('span', {}, item.spt),
+                        item.macStr ? E('div', { 'style': 'font-size: 10px; color: #71717a; margin-top: 2px;' }, 'MAC: ' + item.macStr) : ''
+                    ]);
+
+                    var dstCell = E('div', {}, [
+                        formatIPHook(item.dst),
+                        E('span', {}, item.dpt)
+                    ]);
 
                     var tr = E('tr', { 'class': 'tr', 'style': 'border-bottom: 1px solid #27272a; transition: background 0.2s; cursor: pointer;' }, [
                         E('td', { 'class': 'td', 'style': 'color: #71717a; padding: 10px 12px;' }, item.timeString),
                         E('td', { 'class': 'td', 'style': 'padding: 10px 12px;', 'data-search': item.action }, actionBadge),
                         E('td', { 'class': 'td', 'style': 'font-weight: 500; color: #e4e4e7; padding: 10px 12px;' }, item.rule),
                         E('td', { 'class': 'td', 'style': 'color: #a1a1aa; padding: 10px 12px;' }, item.inFace),
-                        E('td', { 'class': 'td', 'style': 'font-family: monospace; color: #38bdf8; padding: 10px 12px;' }, item.src + item.spt),
-                        E('td', { 'class': 'td', 'style': 'font-family: monospace; color: #c084fc; padding: 10px 12px;' }, item.dst + item.dpt),
+                        E('td', { 'class': 'td', 'style': 'font-family: monospace; color: #38bdf8; padding: 10px 12px;' }, srcCell),
+                        E('td', { 'class': 'td', 'style': 'font-family: monospace; color: #c084fc; padding: 10px 12px;' }, dstCell),
                         E('td', { 'class': 'td', 'style': 'color: #a1a1aa; padding: 10px 12px;' }, item.proto)
                     ]);
                     
-                    // Hover effect
                     tr.addEventListener('mouseenter', function() { this.style.background = '#27272a'; });
                     tr.addEventListener('mouseleave', function() { this.style.background = 'transparent'; });
                     
-                    // Clickable Cells to Search
                     Array.from(tr.childNodes).forEach(function(td) {
-                        td.addEventListener('click', function() {
+                        td.addEventListener('click', function(e) {
+                            if (e.target.tagName === 'A') return; 
                             var textToSearch = td.getAttribute('data-search') || td.textContent.trim();
-                            searchInput.value = textToSearch;
+                            if (textToSearch.indexOf('MAC:') > -1) textToSearch = item.src; 
+                            
+                            var currentTokens = searchInput.value.trim().toLowerCase().split(/\s+/);
+                            var newTokens = textToSearch.toLowerCase().split(/\s+/);
+                            
+                            var alreadyHasTerm = newTokens.every(function(t) { return currentTokens.indexOf(t) !== -1; });
+                            
+                            if (!alreadyHasTerm || searchInput.value.trim() === '') {
+                                searchInput.value = (searchInput.value.trim() + ' ' + textToSearch).trim();
+                            }
                             searchInput.dispatchEvent(new Event('input')); 
                         });
                     });
@@ -413,12 +548,11 @@ return view.extend({
                     tableBody.appendChild(tr);
                 });
             });
-        }, 2); // Poll every 2 seconds
+        }, 2); 
 
         return container;
     },
 
-    // Remove the default LuCI Save/Apply buttons
     handleSaveApply: null,
     handleSave: null,
     handleReset: null
