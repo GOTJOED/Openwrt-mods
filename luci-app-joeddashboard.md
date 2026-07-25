@@ -92,6 +92,7 @@ cat << 'EOF' > /www/luci-static/resources/view/dashboard/index.js
 ```
 Paste the following:
 ```bash
+'use strict';
 'require view';
 'require fs';
 'require poll';
@@ -99,7 +100,7 @@ Paste the following:
 return view.extend({
     // Store live counters and history for the leaderboards
     last_ts: 0,
-    isPaused: false, // --- NEW FEATURE: Pause state for stopping the log feed ---
+    isPaused: false,
     stats: {
         src: {},
         dst: {},
@@ -128,7 +129,7 @@ return view.extend({
         if (rLower.indexOf('allow') > -1 || rLower.indexOf('accept') > -1 || rLower.indexOf('pass') > -1) action = 'ALLOW';
         else if (rLower.indexOf('reject') > -1) action = 'REJECT';
 
-        // --- NEW FEATURE: Dynamic Protocol Mapping & Port Identification ---
+        // Dynamic Protocol Mapping & Port Identification
         var proto = kv.PROTO || '-';
         var protoMap = { 
             '1': 'ICMP', '2': 'IGMP', '6': 'TCP', '17': 'UDP', 
@@ -177,7 +178,7 @@ return view.extend({
                 E('strong', { 'style': 'color: #38bdf8; background: #0f172a; padding: 2px 8px; border-radius: 12px; font-size: 12px;' }, statObj[key])
             ]);
 
-            // --- NEW FEATURE: Clickable Leaderboard Items to Filter Logs ---
+            // Clickable Leaderboard Items to Filter Logs
             row.addEventListener('mouseenter', function() { this.style.background = '#27272a'; });
             row.addEventListener('mouseleave', function() { this.style.background = 'transparent'; });
             
@@ -205,7 +206,7 @@ return view.extend({
     render: function() {
         var self = this;
         
-        // --- NEW FEATURE: Search Bar Element ---
+        // Search Bar Element
         var searchInput = E('input', {
             'type': 'text',
             'id': 'firewall-search-input',
@@ -214,7 +215,7 @@ return view.extend({
             'style': 'flex: 1; padding: 10px 15px; background: #1e1e1e; color: #fff; border: 1px solid #333; border-radius: 6px; box-shadow: inset 0 2px 4px rgba(0,0,0,0.2); outline: none;'
         });
 
-        // --- RECOMMENDED FEATURE: Pause/Resume Button ---
+        // Pause/Resume Button
         var pauseBtn = E('button', {
             'class': 'cbi-button',
             'style': 'margin-left: 15px; background: #0ea5e9; color: #fff; border: none; padding: 10px 15px; border-radius: 6px; cursor: pointer; font-weight: 600; min-width: 130px; transition: background 0.3s;'
@@ -226,12 +227,16 @@ return view.extend({
             this.style.background = self.isPaused ? '#10b981' : '#0ea5e9'; // Switches to green when paused
         });
 
-        var searchContainer = E('div', { 'style': 'display: flex; width: 100%; margin-bottom: 15px;' }, [ searchInput, pauseBtn ]);
+        // Container for search + dynamic hint text below it
+        var searchWrapper = E('div', { 'style': 'display: flex; width: 100%; margin-bottom: 5px;' }, [ searchInput, pauseBtn ]);
+        var searchHint = E('div', { 'style': 'font-size: 11px; color: #a1a1aa; margin-bottom: 15px; margin-left: 5px; font-style: italic;' }, 
+            '💡 Guide: Search by IP (192.168.1.1), Action (DROP), or a Time Range (e.g., 20:00:00 - 21:00:00)'
+        );
 
         var statContainer = E('div', { 'style': 'display: flex; flex-wrap: wrap; margin-bottom: 20px; margin-left: -10px; margin-right: -10px;' }, []);
         var tableBody = E('tbody', { 'id': 'firewall-log-rows' });
 
-        // --- NEW FEATURE: Upgraded Ultra-Modern GOT JOED Banner ---
+        // Upgraded Ultra-Modern GOT JOED Banner
         var headerBanner = E('div', { 
             'style': 'margin-bottom: 25px; padding: 20px 25px; background: linear-gradient(145deg, #18181b 0%, #09090b 100%); border-left: 6px solid #0ea5e9; border-radius: 10px; box-shadow: 0 10px 25px rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: space-between;' 
         }, [
@@ -247,7 +252,8 @@ return view.extend({
 
         var container = E('div', { 'class': 'cbi-map', 'style': 'padding: 10px;' }, [
             headerBanner,
-            searchContainer, // Append Flex Container with Search & Pause
+            searchWrapper, // Added flex container
+            searchHint,    // Added recommendation text
             statContainer,
             E('div', { 'style': 'background: #1e1e1e; border: 1px solid #333; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.3);' }, [
                 E('table', { 'class': 'table', 'style': 'width: 100%; font-size: 13px; margin: 0; border: none;' }, [
@@ -268,21 +274,21 @@ return view.extend({
         ]);
 
         poll.add(function() {
-            // --- NEW FEATURE: Abort polling check if logs are paused ---
+            // Abort polling check if logs are paused
             if (self.isPaused) return Promise.resolve();
 
-            // --- NEW FEATURE: Fetch Uptime alongside dmesg (Increased buffer to 1000 lines for deeper search) ---
-            return fs.exec('sh', ['-c', 'cat /proc/uptime | cut -d" " -f1 && dmesg | tail -n 1000']).then(function(res) {
+            // Fetch Uptime alongside dmesg (Massive buffer of 10000 lines for deep history searches)
+            return fs.exec('sh', ['-c', 'cat /proc/uptime | cut -d" " -f1 && dmesg | tail -n 10000']).then(function(res) {
                 if (!res || !res.stdout) return;
                 
                 var lines = res.stdout.trim().split('\n');
 
-                // --- NEW FEATURE: Time Calculation Math ---
+                // Time Calculation Math
                 var uptimeSeconds = parseFloat(lines.shift()); // Extract Uptime from line 1
                 var bootTimeMs = Date.now() - (uptimeSeconds * 1000); // Browser time minus uptime
 
                 var currentBatchTs = 0;
-                var tableItems = [];
+                var allItems = []; // Hold ALL matching logs internally for searching
 
                 // Parse from bottom (newest) to top
                 for (var i = lines.length - 1; i >= 0; i--) {
@@ -290,7 +296,7 @@ return view.extend({
                     var parsed = self.parseLogLine(lines[i]);
                     if (!parsed) continue;
 
-                    // --- NEW FEATURE: Filter out IPv6 Logs ---
+                    // Filter out IPv6 Logs
                     if (parsed.src.indexOf(':') !== -1 || parsed.dst.indexOf(':') !== -1) continue;
 
                     // Stats only count NEW events based on timestamp
@@ -302,34 +308,58 @@ return view.extend({
                         if (parsed.ts > currentBatchTs) currentBatchTs = parsed.ts;
                     }
                     
-                    // --- NEW FEATURE: Convert to 24H Real-Time ---
+                    // Convert to 24H Real-Time
                     var logTimeMs = bootTimeMs + (parsed.ts * 1000);
                     parsed.timeString = new Date(logTimeMs).toLocaleTimeString('en-GB'); // en-GB forces 24H format natively
 
-                    if (tableItems.length < 30) tableItems.push(parsed);
+                    // Push EVERYTHING to allItems so we can search the whole 10,000 history
+                    allItems.push(parsed);
                 }
 
                 if (currentBatchTs > self.last_ts) self.last_ts = currentBatchTs;
 
-                // --- NEW FEATURE: Apply Search Filter ---
                 var searchQuery = searchInput.value.toLowerCase().trim();
-                var filteredItems = tableItems;
+                var filteredItems = allItems;
 
                 if (searchQuery) {
-                    filteredItems = tableItems.filter(function(item) {
-                        var searchStr = [
-                            item.timeString,
-                            item.action,
-                            item.rule,
-                            item.inFace,
-                            item.src + item.spt,
-                            item.dst + item.dpt,
-                            item.proto
-                        ].join(' ').toLowerCase();
+                    // DYNAMIC TIME RANGE: Detect if search is a time range like "20:00:00 - 21:00:00"
+                    var timeRangeMatch = searchQuery.match(/(\d{1,2}:\d{2}(?::\d{2})?)\s*-\s*(\d{1,2}:\d{2}(?::\d{2})?)/);
+                    
+                    if (timeRangeMatch) {
+                        var startT = timeRangeMatch[1];
+                        var endT = timeRangeMatch[2];
                         
-                        return searchStr.indexOf(searchQuery) !== -1;
-                    });
+                        // Normalize formats (pad seconds and leading zeros for safe string comparison)
+                        if (startT.length <= 5) startT += ':00';
+                        if (endT.length <= 5) endT += ':59';
+                        if (startT.length === 7) startT = '0' + startT;
+                        if (endT.length === 7) endT = '0' + endT;
+
+                        filteredItems = allItems.filter(function(item) {
+                            var itemT = item.timeString;
+                            if (itemT.length === 7) itemT = '0' + itemT; // Pad log time if needed
+                            return itemT >= startT && itemT <= endT;
+                        });
+                    } else {
+                        // STANDARD TEXT SEARCH across all fields
+                        filteredItems = allItems.filter(function(item) {
+                            var searchStr = [
+                                item.timeString,
+                                item.action,
+                                item.rule,
+                                item.inFace,
+                                item.src + item.spt,
+                                item.dst + item.dpt,
+                                item.proto
+                            ].join(' ').toLowerCase();
+                            
+                            return searchStr.indexOf(searchQuery) !== -1;
+                        });
+                    }
                 }
+
+                // Slice the huge filtered list down to 80 rows for safe display rendering
+                var displayItems = filteredItems.slice(0, 80);
 
                 // 1. Rebuild Stat Cards
                 while (statContainer.firstChild) statContainer.removeChild(statContainer.firstChild);
@@ -340,13 +370,13 @@ return view.extend({
                 // 2. Rebuild Table Rows
                 while (tableBody.firstChild) tableBody.removeChild(tableBody.firstChild);
                 
-                if (filteredItems.length === 0) {
+                if (displayItems.length === 0) {
                      tableBody.appendChild(E('tr', {}, [
-                         E('td', { 'colspan': '7', 'style': 'text-align: center; padding: 20px; color: #a1a1aa; font-style: italic;' }, 'No matching logs found.')
+                         E('td', { 'colspan': '7', 'style': 'text-align: center; padding: 20px; color: #a1a1aa; font-style: italic;' }, 'No matching logs found in history.')
                      ]));
                 }
                 
-                filteredItems.forEach(function(item) {
+                displayItems.forEach(function(item) {
 
                     var badgeColor = '#52525b'; // default gray
                     if (item.action === 'ALLOW') badgeColor = '#059669'; // emerald
@@ -369,17 +399,11 @@ return view.extend({
                     tr.addEventListener('mouseenter', function() { this.style.background = '#27272a'; });
                     tr.addEventListener('mouseleave', function() { this.style.background = 'transparent'; });
                     
-                    // --- NEW FEATURE: Clickable Cells to Search ---
+                    // Clickable Cells to Search
                     Array.from(tr.childNodes).forEach(function(td) {
                         td.addEventListener('click', function() {
-                            // Extract text, handling cases like the action badge which has inner spans
                             var textToSearch = td.getAttribute('data-search') || td.textContent.trim();
-                            // Optional: Strip port info if clicking an IP so it searches the whole IP
-                            // if (textToSearch.indexOf(':') > 0 && (td.style.color === 'rgb(56, 189, 248)' || td.style.color === 'rgb(192, 132, 252)')) {
-                            //    textToSearch = textToSearch.split(':')[0];
-                            // }
                             searchInput.value = textToSearch;
-                            // Trigger an input event so any listeners (if we added real-time filtering) would fire
                             searchInput.dispatchEvent(new Event('input')); 
                         });
                     });
