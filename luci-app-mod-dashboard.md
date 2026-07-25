@@ -26,6 +26,8 @@ A fresh installation of OpenWrt 25.x does not come with a built-in visual firewa
 
 ### Prerequisites
 * OpenWrt 25.x or later
+* Enable logging on your Firewall Rule under Network -> Firewall -> Traffic Rules
+* <img width="519" height="72" alt="image" src="https://github.com/user-attachments/assets/4d1d610f-91fc-429e-99e5-cf679043b156" />
 * LuCI web interface installed
 * SSH access to your router
 
@@ -95,6 +97,7 @@ Paste the following:
 return view.extend({
     // Store live counters and history for the leaderboards
     last_ts: 0,
+    isPaused: false, // --- NEW FEATURE: Pause state for stopping the log feed ---
     stats: {
         src: {},
         dst: {},
@@ -123,12 +126,29 @@ return view.extend({
         if (rLower.indexOf('allow') > -1 || rLower.indexOf('accept') > -1 || rLower.indexOf('pass') > -1) action = 'ALLOW';
         else if (rLower.indexOf('reject') > -1) action = 'REJECT';
 
-        // Map Protocol numbers to readable names
+        // --- NEW FEATURE: Dynamic Protocol Mapping & Port Identification ---
         var proto = kv.PROTO || '-';
-        if (proto === '1') proto = 'ICMP';
-        if (proto === '2') proto = 'IGMP';
-        if (proto === '6') proto = 'TCP';
-        if (proto === '17') proto = 'UDP';
+        var protoMap = { 
+            '1': 'ICMP', '2': 'IGMP', '6': 'TCP', '17': 'UDP', 
+            '47': 'GRE', '50': 'ESP', '51': 'AH', '89': 'OSPF'
+        };
+        
+        var portMap = { 
+            '20': 'FTP', '21': 'FTP', '22': 'SSH', '23': 'TELNET', 
+            '25': 'SMTP', '53': 'DNS', '67': 'DHCP', '68': 'DHCP', 
+            '80': 'HTTP', '123': 'NTP', '443': 'HTTPS', '500': 'IKE', '4500': 'IPSEC' 
+        };
+
+        if (protoMap[proto]) {
+            proto = protoMap[proto];
+        } else if (/^\d+$/.test(proto)) {
+            proto = 'PROTO-' + proto; // Custom/unknown numeric protocols dynamically handled
+        }
+
+        var fmtPort = function(p) {
+            if (!p) return '';
+            return ':' + p + (portMap[p] ? ' (' + portMap[p] + ')' : '');
+        };
 
         return {
             ts: ts,
@@ -138,22 +158,36 @@ return view.extend({
             src: kv.SRC || '-',
             dst: kv.DST || '-',
             proto: proto,
-            spt: kv.SPT ? ':' + kv.SPT : '',
-            dpt: kv.DPT ? ':' + kv.DPT : ''
+            spt: fmtPort(kv.SPT),
+            dpt: fmtPort(kv.DPT)
         };
     },
 
     // Helper to generate a sorted leaderboard card
-    generateTopList: function(statObj, title) {
+    generateTopList: function(statObj, title, searchInput) {
         var sorted = Object.keys(statObj).sort(function(a, b) {
             return statObj[b] - statObj[a];
         }).slice(0, 5); // Get top 5
 
         var listItems = sorted.map(function(key) {
-            return E('div', { 'style': 'display: flex; justify-content: space-between; margin-bottom: 8px; border-bottom: 1px solid #333; padding-bottom: 5px;' }, [
+            var row = E('div', { 'style': 'display: flex; justify-content: space-between; margin-bottom: 8px; border-bottom: 1px solid #333; padding-bottom: 5px; cursor: pointer; transition: background 0.2s;' }, [
                 E('span', { 'style': 'font-family: monospace; font-size: 13px; color: #ddd;' }, key),
                 E('strong', { 'style': 'color: #38bdf8; background: #0f172a; padding: 2px 8px; border-radius: 12px; font-size: 12px;' }, statObj[key])
             ]);
+
+            // --- NEW FEATURE: Clickable Leaderboard Items to Filter Logs ---
+            row.addEventListener('mouseenter', function() { this.style.background = '#27272a'; });
+            row.addEventListener('mouseleave', function() { this.style.background = 'transparent'; });
+            
+            row.addEventListener('click', function() {
+                if (searchInput) {
+                    searchInput.value = key;
+                    // Trigger an input event so the UI updates and the next poll cycle filters the history
+                    searchInput.dispatchEvent(new Event('input')); 
+                }
+            });
+
+            return row;
         });
 
         if (listItems.length === 0) {
@@ -172,17 +206,46 @@ return view.extend({
         // --- NEW FEATURE: Search Bar Element ---
         var searchInput = E('input', {
             'type': 'text',
+            'id': 'firewall-search-input',
             'placeholder': 'Search Time, Action, Rule, IP, Proto...',
             'class': 'cbi-input-text',
-            'style': 'width: 100%; padding: 10px 15px; margin-bottom: 15px; background: #1e1e1e; color: #fff; border: 1px solid #333; border-radius: 6px; box-shadow: inset 0 2px 4px rgba(0,0,0,0.2); outline: none;'
+            'style': 'flex: 1; padding: 10px 15px; background: #1e1e1e; color: #fff; border: 1px solid #333; border-radius: 6px; box-shadow: inset 0 2px 4px rgba(0,0,0,0.2); outline: none;'
         });
+
+        // --- RECOMMENDED FEATURE: Pause/Resume Button ---
+        var pauseBtn = E('button', {
+            'class': 'cbi-button',
+            'style': 'margin-left: 15px; background: #0ea5e9; color: #fff; border: none; padding: 10px 15px; border-radius: 6px; cursor: pointer; font-weight: 600; min-width: 130px; transition: background 0.3s;'
+        }, '⏸ Pause Logs');
+
+        pauseBtn.addEventListener('click', function() {
+            self.isPaused = !self.isPaused;
+            this.textContent = self.isPaused ? '▶ Resume Logs' : '⏸ Pause Logs';
+            this.style.background = self.isPaused ? '#10b981' : '#0ea5e9'; // Switches to green when paused
+        });
+
+        var searchContainer = E('div', { 'style': 'display: flex; width: 100%; margin-bottom: 15px;' }, [ searchInput, pauseBtn ]);
 
         var statContainer = E('div', { 'style': 'display: flex; flex-wrap: wrap; margin-bottom: 20px; margin-left: -10px; margin-right: -10px;' }, []);
         var tableBody = E('tbody', { 'id': 'firewall-log-rows' });
 
+        // --- NEW FEATURE: Upgraded Ultra-Modern GOT JOED Banner ---
+        var headerBanner = E('div', { 
+            'style': 'margin-bottom: 25px; padding: 20px 25px; background: linear-gradient(145deg, #18181b 0%, #09090b 100%); border-left: 6px solid #0ea5e9; border-radius: 10px; box-shadow: 0 10px 25px rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: space-between;' 
+        }, [
+            E('div', {}, [
+                E('h1', { 'style': 'margin: 0; font-size: 32px; font-weight: 900; letter-spacing: 3px; text-transform: uppercase; background: linear-gradient(90deg, #38bdf8, #818cf8); -webkit-background-clip: text; -webkit-text-fill-color: transparent; filter: drop-shadow(0px 2px 4px rgba(0,0,0,0.5));' }, 'GOT JOED'),
+                E('div', { 'style': 'color: #a1a1aa; font-size: 14px; margin-top: 6px; font-weight: 600; letter-spacing: 1px; text-transform: uppercase;' }, 'Live Firewall Monitoring ⚡')
+            ]),
+            E('div', { 'style': 'background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.3); color: #10b981; padding: 6px 12px; border-radius: 20px; font-size: 11px; font-weight: bold; letter-spacing: 1px; display: flex; align-items: center; gap: 8px;' }, [
+                E('span', { 'style': 'display: inline-block; width: 8px; height: 8px; background: #10b981; border-radius: 50%; box-shadow: 0 0 8px #10b981;' }, ''),
+                'SYSTEM ACTIVE'
+            ])
+        ]);
+
         var container = E('div', { 'class': 'cbi-map', 'style': 'padding: 10px;' }, [
-            E('h2', { 'style': 'margin-bottom: 20px; font-weight: 300; color: #fff;' }, 'Live Firewall Intelligence'),
-            searchInput, // --- NEW FEATURE: Append Search Bar here ---
+            headerBanner,
+            searchContainer, // Append Flex Container with Search & Pause
             statContainer,
             E('div', { 'style': 'background: #1e1e1e; border: 1px solid #333; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.3);' }, [
                 E('table', { 'class': 'table', 'style': 'width: 100%; font-size: 13px; margin: 0; border: none;' }, [
@@ -203,19 +266,21 @@ return view.extend({
         ]);
 
         poll.add(function() {
-            // --- NEW FEATURE: Fetch Uptime alongside dmesg to calculate real-world time ---
-            return fs.exec('sh', ['-c', 'cat /proc/uptime | cut -d" " -f1 && dmesg | tail -n 150']).then(function(res) {
+            // --- NEW FEATURE: Abort polling check if logs are paused ---
+            if (self.isPaused) return Promise.resolve();
+
+            // --- NEW FEATURE: Fetch Uptime alongside dmesg (Increased buffer to 1000 lines for deeper search) ---
+            return fs.exec('sh', ['-c', 'cat /proc/uptime | cut -d" " -f1 && dmesg | tail -n 1000']).then(function(res) {
                 if (!res || !res.stdout) return;
                 
                 var lines = res.stdout.trim().split('\n');
-                
+
                 // --- NEW FEATURE: Time Calculation Math ---
                 var uptimeSeconds = parseFloat(lines.shift()); // Extract Uptime from line 1
                 var bootTimeMs = Date.now() - (uptimeSeconds * 1000); // Browser time minus uptime
 
                 var currentBatchTs = 0;
                 var tableItems = [];
-                var filterText = searchInput.value.toLowerCase(); // Get current search query
 
                 // Parse from bottom (newest) to top
                 for (var i = lines.length - 1; i >= 0; i--) {
@@ -226,8 +291,6 @@ return view.extend({
                     // --- NEW FEATURE: Filter out IPv6 Logs ---
                     if (parsed.src.indexOf(':') !== -1 || parsed.dst.indexOf(':') !== -1) continue;
 
-                    if (tableItems.length < 30) tableItems.push(parsed);
-
                     // Stats only count NEW events based on timestamp
                     if (parsed.ts > self.last_ts) {
                         if (parsed.src !== '-') self.stats.src[parsed.src] = (self.stats.src[parsed.src] || 0) + 1;
@@ -236,27 +299,52 @@ return view.extend({
                         
                         if (parsed.ts > currentBatchTs) currentBatchTs = parsed.ts;
                     }
+                    
+                    // --- NEW FEATURE: Convert to 24H Real-Time ---
+                    var logTimeMs = bootTimeMs + (parsed.ts * 1000);
+                    parsed.timeString = new Date(logTimeMs).toLocaleTimeString('en-GB'); // en-GB forces 24H format natively
+
+                    if (tableItems.length < 30) tableItems.push(parsed);
                 }
 
                 if (currentBatchTs > self.last_ts) self.last_ts = currentBatchTs;
 
+                // --- NEW FEATURE: Apply Search Filter ---
+                var searchQuery = searchInput.value.toLowerCase().trim();
+                var filteredItems = tableItems;
+
+                if (searchQuery) {
+                    filteredItems = tableItems.filter(function(item) {
+                        var searchStr = [
+                            item.timeString,
+                            item.action,
+                            item.rule,
+                            item.inFace,
+                            item.src + item.spt,
+                            item.dst + item.dpt,
+                            item.proto
+                        ].join(' ').toLowerCase();
+                        
+                        return searchStr.indexOf(searchQuery) !== -1;
+                    });
+                }
+
                 // 1. Rebuild Stat Cards
                 while (statContainer.firstChild) statContainer.removeChild(statContainer.firstChild);
-                statContainer.appendChild(self.generateTopList(self.stats.rule, 'Top Rules Hit'));
-                statContainer.appendChild(self.generateTopList(self.stats.src, 'Top Source IPs'));
-                statContainer.appendChild(self.generateTopList(self.stats.dst, 'Top Target IPs'));
+                statContainer.appendChild(self.generateTopList(self.stats.rule, 'Top Rules Hit', searchInput));
+                statContainer.appendChild(self.generateTopList(self.stats.src, 'Top Source IPs', searchInput));
+                statContainer.appendChild(self.generateTopList(self.stats.dst, 'Top Target IPs', searchInput));
 
                 // 2. Rebuild Table Rows
                 while (tableBody.firstChild) tableBody.removeChild(tableBody.firstChild);
                 
-                tableItems.forEach(function(item) {
-                    // --- NEW FEATURE: Convert to 24H Real-Time ---
-                    var logTimeMs = bootTimeMs + (item.ts * 1000);
-                    var timeString = new Date(logTimeMs).toLocaleTimeString('en-GB'); // en-GB forces 24H
-
-                    // --- NEW FEATURE: Search Filter Logic ---
-                    var rowString = [timeString, item.action, item.rule, item.inFace, item.src, item.dst, item.proto].join(' ').toLowerCase();
-                    if (filterText && rowString.indexOf(filterText) === -1) return; // Skip if no match
+                if (filteredItems.length === 0) {
+                     tableBody.appendChild(E('tr', {}, [
+                         E('td', { 'colspan': '7', 'style': 'text-align: center; padding: 20px; color: #a1a1aa; font-style: italic;' }, 'No matching logs found.')
+                     ]));
+                }
+                
+                filteredItems.forEach(function(item) {
 
                     var badgeColor = '#52525b'; // default gray
                     if (item.action === 'ALLOW') badgeColor = '#059669'; // emerald
@@ -265,21 +353,13 @@ return view.extend({
 
                     var actionBadge = E('span', { 'style': 'background:' + badgeColor + '; color:#fff; padding: 3px 8px; border-radius: 4px; font-weight: 700; font-size: 10px; letter-spacing: 0.5px;' }, item.action);
 
-                    // --- NEW FEATURE: Clickable IPs ---
-                    var srcSpan = E('span', { 'style': 'cursor: pointer; border-bottom: 1px dashed #38bdf8;', 'title': 'Click to filter' }, item.src + item.spt);
-                    var dstSpan = E('span', { 'style': 'cursor: pointer; border-bottom: 1px dashed #c084fc;', 'title': 'Click to filter' }, item.dst + item.dpt);
-
-                    // When clicked, inject the IP into the search bar
-                    srcSpan.addEventListener('click', function() { searchInput.value = item.src; });
-                    dstSpan.addEventListener('click', function() { searchInput.value = item.dst; });
-
-                    var tr = E('tr', { 'class': 'tr', 'style': 'border-bottom: 1px solid #27272a; transition: background 0.2s;' }, [
-                        E('td', { 'class': 'td', 'style': 'color: #71717a; padding: 10px 12px;' }, timeString), // Replaced item.ts with real time
-                        E('td', { 'class': 'td', 'style': 'padding: 10px 12px;' }, actionBadge),
+                    var tr = E('tr', { 'class': 'tr', 'style': 'border-bottom: 1px solid #27272a; transition: background 0.2s; cursor: pointer;' }, [
+                        E('td', { 'class': 'td', 'style': 'color: #71717a; padding: 10px 12px;' }, item.timeString),
+                        E('td', { 'class': 'td', 'style': 'padding: 10px 12px;', 'data-search': item.action }, actionBadge),
                         E('td', { 'class': 'td', 'style': 'font-weight: 500; color: #e4e4e7; padding: 10px 12px;' }, item.rule),
                         E('td', { 'class': 'td', 'style': 'color: #a1a1aa; padding: 10px 12px;' }, item.inFace),
-                        E('td', { 'class': 'td', 'style': 'font-family: monospace; color: #38bdf8; padding: 10px 12px;' }, srcSpan), // Replaced with clickable span
-                        E('td', { 'class': 'td', 'style': 'font-family: monospace; color: #c084fc; padding: 10px 12px;' }, dstSpan), // Replaced with clickable span
+                        E('td', { 'class': 'td', 'style': 'font-family: monospace; color: #38bdf8; padding: 10px 12px;' }, item.src + item.spt),
+                        E('td', { 'class': 'td', 'style': 'font-family: monospace; color: #c084fc; padding: 10px 12px;' }, item.dst + item.dpt),
                         E('td', { 'class': 'td', 'style': 'color: #a1a1aa; padding: 10px 12px;' }, item.proto)
                     ]);
                     
@@ -287,6 +367,21 @@ return view.extend({
                     tr.addEventListener('mouseenter', function() { this.style.background = '#27272a'; });
                     tr.addEventListener('mouseleave', function() { this.style.background = 'transparent'; });
                     
+                    // --- NEW FEATURE: Clickable Cells to Search ---
+                    Array.from(tr.childNodes).forEach(function(td) {
+                        td.addEventListener('click', function() {
+                            // Extract text, handling cases like the action badge which has inner spans
+                            var textToSearch = td.getAttribute('data-search') || td.textContent.trim();
+                            // Optional: Strip port info if clicking an IP so it searches the whole IP
+                            // if (textToSearch.indexOf(':') > 0 && (td.style.color === 'rgb(56, 189, 248)' || td.style.color === 'rgb(192, 132, 252)')) {
+                            //    textToSearch = textToSearch.split(':')[0];
+                            // }
+                            searchInput.value = textToSearch;
+                            // Trigger an input event so any listeners (if we added real-time filtering) would fire
+                            searchInput.dispatchEvent(new Event('input')); 
+                        });
+                    });
+
                     tableBody.appendChild(tr);
                 });
             });
@@ -300,6 +395,7 @@ return view.extend({
     handleSave: null,
     handleReset: null
 });
+EOF
 ```
 #### 5. Apply Changes 
 ```bash
@@ -312,3 +408,11 @@ The Dashboard should now apear at your mother Tabs.
 
 ## Screenshots
 <img width="1342" height="913" alt="dashboard" src="https://github.com/user-attachments/assets/48224aff-21bc-4e57-af0a-4fe1b1bad7b4" />
+
+#### To REMOVE everything
+```bash
+rm -rf /www/luci-static/resources/view/dashboard
+rm -f /usr/share/luci/menu.d/luci-app-joeddashboard.json
+rm -f /usr/share/rpcd/acl.d/luci-app-joeddashboard.json
+rm -f /www/luci-static/resources/view/dashboard/index.js
+```
