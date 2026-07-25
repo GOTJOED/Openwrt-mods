@@ -9,7 +9,7 @@ A fresh installation of OpenWrt 25.x does not come with a built-in visual firewa
 🛡️ **Live Packet Tracking**
 * Real-time monitoring of OpenWrt `dmesg` logs
 * Visual badges for firewall actions (ALLOW, DROP, REJECT)
-* Protocol identification (TCP, UDP, ICMP)
+* Protocol identification (TCP, UDP, ICMP, Custom Protocol)
 
 📊 **Smart Analytics**
 * Top Source IPs leaderboard
