@@ -37,7 +37,7 @@ mkdir -p /www/luci-static/resources/view/dashboard
 
 #### 2. Register "Dashboard" LuCi Menu
 ```bash
-vi /usr/share/luci/menu.d/luci-app-dashboard.json
+vi /usr/share/luci/menu.d/luci-app-joeddashboard.json
 ```
 Paste the following:
 ```bash
@@ -55,7 +55,7 @@ Paste the following:
 #### 3. Setup ACL Permissions
 This Acts as the security gatekeeper for OpenWrt's rpcd daemon. Without this, LuCI hides the tab and blocks access even for the root user.
 ```bash
-vi /usr/share/rpcd/acl.d/luci-app-dashboard.json
+vi /usr/share/rpcd/acl.d/luci-app-joeddashboard.json
 ```
 Paste the following:
 ```bash
