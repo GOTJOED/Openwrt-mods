@@ -21,7 +21,7 @@ A fresh installation of OpenWrt 25.x does not come with a built-in visual firewa
 * Global search bar
 
 ⚠️ **NOTE**
-* This is not a Historical view of your firewall logs, this only parse the last 1000 lines of the `dmesg` logs
+* This is not a Historical view of your firewall logs, this only parse the last 1000 lines of the `dmesg` captured
 ---
 
 ## Installation
