@@ -20,8 +20,10 @@ A fresh installation of OpenWrt 25.x does not come with a built-in visual firewa
 * Clickable IP addresses for instant search filtering
 * Global search bar
 
-⚠️ **NOTE**
-* This is not a Historical view of your firewall logs, this only parse the last 1000 lines of the `dmesg` captured
+⚠️ **IMPORTANT NODE: Log Buffer & History**
+* Limited Historical Scope: While this dashboard provides a searchable history, it is not a long-term forensic log solution. It parses and displays only the most recent 10,000 lines of the system dmesg buffer.
+* Dynamic Search: The dashboard allows you to filter and inspect this 10,000-line window in real-time, making it an excellent tool for active troubleshooting and immediate traffic auditing.
+* Data Persistence: Because this tool reads directly from the volatile dmesg ring buffer, logs older than the current 10,000-line capture limit will be overwritten by new system events and will no longer be accessible via this interface.
 ---
 
 ## Installation
