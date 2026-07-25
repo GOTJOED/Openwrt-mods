@@ -569,7 +569,9 @@ Then refresh your OpenWrt.
 The Dashboard should now apear at your mother Tabs.
 
 ## Screenshots
-<img width="1342" height="913" alt="dashboard" src="https://github.com/user-attachments/assets/48224aff-21bc-4e57-af0a-4fe1b1bad7b4" />
+<img width="1307" height="935" alt="image" src="https://github.com/user-attachments/assets/249e6762-9b47-424b-a8db-a5f59daafccd" />
+<img width="1281" height="909" alt="image" src="https://github.com/user-attachments/assets/af41a733-3454-46a0-a63f-9288a2d4ca2e" />
+
 
 #### To REMOVE everything
 ```bash
