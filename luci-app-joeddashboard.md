@@ -25,9 +25,9 @@ A fresh installation of OpenWrt 25.x does not come with a built-in visual firewa
 * Action Badging: Color-coded tags for Actions (Green for ALLOW, Red for DROP, Orange for REJECT) for quick visual scanning.
 
 ⚠️ **IMPORTANT NOTE: Log Buffer & History**
-* Limited Historical Scope: While this dashboard provides a searchable history, it is not a long-term forensic log solution. It parses and displays only the most recent 10,000 lines of the system dmesg buffer.
-* Dynamic Search: The dashboard allows you to filter and inspect this 10,000-line window in real-time, making it an excellent tool for active troubleshooting and immediate traffic auditing.
-* Data Persistence: Because this tool reads directly from the volatile dmesg ring buffer, logs older than the current 10,000-line capture limit will be overwritten by new system events and will no longer be accessible via this interface.
+* Cleared on Reboot (RAM Storage): OpenWrt stores live system logs in temporary RAM rather than on your hard drive. All history displayed here will be completely erased every time the router reboots.
+* Intended Use: This tool is optimized for active troubleshooting, real-time threat detection, and live traffic auditing, rather than permanent, long-term forensic storage.
+* Dynamic Auditing: While not a permanent archive, real-time memory parsing makes this an exceptionally fast tool for immediate network inspection and live filtering.
 ---
 
 ## Installation
