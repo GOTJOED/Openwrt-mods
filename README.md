@@ -4,6 +4,10 @@
 
 A fresh installation of OpenWrt 25.x does not come with a built-in visual firewall intelligence dashboard out of the box. This lightweight package bridges that gap by adding a real-time tracking interface directly into your LuCI web UI—letting you visualize dropped and allowed packets, identify top offending IPs, and monitor triggered firewall rules straight from your router without heavy backend databases.
 
+# Preview
+<img width="1307" height="935" alt="image" src="https://github.com/user-attachments/assets/249e6762-9b47-424b-a8db-a5f59daafccd" />
+<img width="1281" height="909" alt="image" src="https://github.com/user-attachments/assets/af41a733-3454-46a0-a63f-9288a2d4ca2e" />
+
 ## Features
 
 🔍 **Search & Forensics**
@@ -567,11 +571,6 @@ rm -rf /tmp/luci-indexcache /tmp/luci-modulecache/
 ```
 Then refresh your OpenWrt. 
 The Dashboard should now apear at your mother Tabs.
-
-## Screenshots
-<img width="1307" height="935" alt="image" src="https://github.com/user-attachments/assets/249e6762-9b47-424b-a8db-a5f59daafccd" />
-<img width="1281" height="909" alt="image" src="https://github.com/user-attachments/assets/af41a733-3454-46a0-a63f-9288a2d4ca2e" />
-
 
 #### To REMOVE everything
 ```bash
